@@ -5,10 +5,9 @@ const FieldValue = require('firebase-admin').firestore.FieldValue;
 exports.getPatients = (request, response) => {
 
     const dateString = getDateString();
+    const patRef = db.collection("root").doc(dateString).collection("patients");
 
-    const dateRef = db.collection("root").doc(dateString).collection("patients");
-
-    dateRef
+    patRef
         .orderBy("qNumber")
         .get()
         .then((data) => {
@@ -19,7 +18,9 @@ exports.getPatients = (request, response) => {
                     name: doc.data().name,
                     phoneNumber: doc.data().phoneNumber,
                     qNumber: doc.data().qNumber,
-                    status: doc.data().status
+                    status: doc.data().status,
+                    checkInTime: doc.data().checkInTime,
+                    lastUpdate: doc.data().lastUpdate
                 })
             });
             return response.json(patients);
@@ -38,21 +39,29 @@ exports.newPatient = async (request, response) => {
     }
 
     const dateString = getDateString();
-    const dateRef = db.collection("root").doc(dateString);
-    const collRef = dateRef.collection("patients");
+    const dayRef = db.collection("root").doc(dateString);
+    const patRef = dayRef.collection("patients");
 
-    const qDoc = await dateRef.get("patientsProcessed");
-    const qNumber = qDoc.data().patientsProcessed;
+    let qDoc;
+    let qNumber;
+    try {
+        qDoc = await dayRef.get("patientsProcessed");
+        qNumber = qDoc.data().patientsProcessed;
+    } catch (err) {
+        qNumber = 0;
+        dayRef.set({ patientsProcessed: qNumber });
+    }
 
     const newUser = {
         name: request.body.name,
         phoneNumber: request.body.phoneNumber,
         qNumber: qNumber + 1,
         status: "waiting",
-        checkInTime: FieldValue.serverTimestamp()
+        checkInTime: FieldValue.serverTimestamp(),
+        lastUpdate: FieldValue.serverTimestamp()
     };
 
-    collRef
+    patRef
         .add(newUser)
         .then((doc) => {
             const responseUser = newUser;
@@ -63,28 +72,55 @@ exports.newPatient = async (request, response) => {
             console.log(err);
             return response.status(500).json({ error: "Something went wrong!" });
         });
-
-    return response.send(200, { message: 'Success!' });
 }
 
-exports.updatePatientStatus = (request, response) => {
-    console.log(request.body.id);
+exports.updatePatientStatus = async (request, response) => {
     if (request.body.id === "" || request.body.status === "") {
         return response.status(400).json({ body: "Must not be empty! " });
     }
 
     const dateString = getDateString();
-    db
-        .collection("root")
-        .doc(dateString)
-        .collection("patients").doc(request.body.id)
-        .update({
-            status: request.body.status
-        })
+    const dayRef = db.collection("root").doc(dateString);
+    const docRef = dayRef.collection("patients").doc(request.body.id);
+
+    let updateData;
+    if (request.body.status === "inside") {
+        updateData = {
+            status: request.body.status,
+            lastUpdate: FieldValue.serverTimestamp(),
+            serviceTime: FieldValue.serverTimestamp()
+        }
+        const docData = await docRef.get();
+        let diffMilli = new Date() - new Date(1000 * docData.data().checkInTime["_seconds"]);
+        let diffMin = Math.round(diffMilli / (1000 * 60));
+
+        dayRef.update({
+            waitingTime: FieldValue.increment(diffMin)
+        }).catch((err) => {
+            console.log(err);
+            return response.status(500).json({ error: "Something went wrong!" });
+        });
+
+        try {
+            sDoc = await dayRef.update({ "patientsServed": FieldValue.increment(1) });
+        } catch (err) {
+            dayRef.set({ patientsProcessed: FieldValue.increment(1) });
+        }
+
+    } else {
+        updateData = {
+            status: request.body.status,
+            lastUpdate: FieldValue.serverTimestamp()
+        }
+    }
+
+    docRef
+        .update(updateData)
         .catch((err) => {
             console.log(err);
             return response.status(500).json({ error: "Something went wrong!" });
         });
+
 
     return response.send(200, { message: 'Success!' });
 
@@ -92,19 +128,19 @@ exports.updatePatientStatus = (request, response) => {
 
 exports.addTrigger = (change) => {
     const dateString = getDateString();
-    let docRef = db.collection("root").doc(dateString);
+    let dayRef = db.collection("root").doc(dateString);
 
 
     if (!change.before.exists) {
         // New document Created : add one to count
-        docRef.update({ patientsProcessed: FieldValue.increment(1) });
+        dayRef.update({ patientsProcessed: FieldValue.increment(1) });
 
     } else if (change.before.exists && change.after.exists) {
         // Updating existing document : Do nothing
 
     } else if (!change.after.exists) {
         // Deleting document : subtract one from count
-        docRef.update({ patientsProcessed: FieldValue.increment(-1) });
+        dayRef.update({ patientsProcessed: FieldValue.increment(-1) });
 
     }
 
@@ -117,4 +153,31 @@ function getDateString() {
         String(currentDate.getMonth() + 1) +
         currentDate.getFullYear();
     return dateString;
+}
+
+//// Testing
+exports.testWait = async () => {
+    const dateString = getDateString();
+    let docRef = await db.collection("root").doc(dateString).collection('patients');
+
+    docRef.orderBy("qNumber").get().then((querySnapshot) => {
+
+        let waitTime = 0;
+        let count = 1;
+        //querySnapshot is "iteratable" itself
+        querySnapshot.forEach((userDoc) => {
+
+            //If you want to get doc data
+            let userDocData = userDoc.data()
+            let end = new Date(userDocData.serviceTime['_seconds'] * 1000);
+            let start = new Date(userDocData.checkInTime['_seconds'] * 1000);
+            console.log(end.getMinutes() - start.getMinutes(), end, start, userDocData.qNumber);
+            waitTime += end.getMinutes() - start.getMinutes()
+            console.log('Average Wait Time for patient ' + (count + 1) + ' is ' + waitTime / count);
+            count += 1;
+
+        });
+    })
+    //     console.log("Responded");
+    //     return response.send(200, { message: 'Success!' });
 }
