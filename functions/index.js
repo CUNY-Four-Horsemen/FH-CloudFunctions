@@ -8,12 +8,13 @@ const app = express();
 // Automatically allow cross-origin requests
 app.use(cors({ origin: true }));
 
-const { getPatients, newPatient, updatePatientStatus, addTrigger, testWait } = require("./API/patients")
+const { getPatients, getAverageWaitingTime, newPatient, updatePatientStatus, addTrigger } = require("./API/patients")
 
-app.get("/patients", getPatients);
+app.get("/getWaiting", getAverageWaitingTime);
+
+app.post("/patients", getPatients);
 app.post("/newPatient", newPatient);
 app.post("/updatePatientStatus", updatePatientStatus);
-app.get("/testing", testWait);
 
 exports.api = functions.https.onRequest(app);
 

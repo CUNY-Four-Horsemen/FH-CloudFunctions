@@ -4,7 +4,11 @@ const FieldValue = require('firebase-admin').firestore.FieldValue;
 
 exports.getPatients = (request, response) => {
 
-    const dateString = getDateString();
+    if (!request.body.dateString) {
+        return response.status(400).json({ body: "Must not be empty! " });
+    }
+
+    const dateString = request.body.dateString;
     const patRef = db.collection("root").doc(dateString).collection("patients");
 
     patRef
@@ -29,6 +33,21 @@ exports.getPatients = (request, response) => {
             console.log(err);
             return response.status(500).json({ error: err.code });
         });
+}
+
+exports.getAverageWaitingTime = async (request, response) => {
+    const dateString = getDateString();
+    let dayRef = db.collection("root").doc(dateString);
+
+    let waitingRef = await dayRef.get("waitingTime");
+    let totalWaitingTime = waitingRef.data().waitingTime;
+
+    let servedRef = await dayRef.get("patientsServed");
+    let totalServedPatients = servedRef.data().patientsServed;
+
+    let averageWaitingTime = totalWaitingTime / totalServedPatients;
+
+    return response.status(200).json({ averageWaitingTime: averageWaitingTime });
 }
 
 exports.newPatient = async (request, response) => {
@@ -153,31 +172,4 @@ function getDateString() {
         String(currentDate.getMonth() + 1) +
         currentDate.getFullYear();
     return dateString;
-}
-
-//// Testing
-exports.testWait = async () => {
-    const dateString = getDateString();
-    let docRef = await db.collection("root").doc(dateString).collection('patients');
-
-    docRef.orderBy("qNumber").get().then((querySnapshot) => {
-
-        let waitTime = 0;
-        let count = 1;
-        //querySnapshot is "iteratable" itself
-        querySnapshot.forEach((userDoc) => {
-
-            //If you want to get doc data
-            let userDocData = userDoc.data()
-            let end = new Date(userDocData.serviceTime['_seconds'] * 1000);
-            let start = new Date(userDocData.checkInTime['_seconds'] * 1000);
-            console.log(end.getMinutes() - start.getMinutes(), end, start, userDocData.qNumber);
-            waitTime += end.getMinutes() - start.getMinutes()
-            console.log('Average Wait Time for patient ' + (count + 1) + ' is ' + waitTime / count);
-            count += 1;
-
-        });
-    })
-    //     console.log("Responded");
-    //     return response.send(200, { message: 'Success!' });
 }
