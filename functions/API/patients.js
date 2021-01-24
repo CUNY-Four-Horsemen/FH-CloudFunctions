@@ -9,16 +9,17 @@ exports.getPatients = (request, response) => {
     const dateRef = db.collection("root").doc(dateString).collection("patients");
 
     dateRef
-        // .orderBy("qNumber")
+        .orderBy("qNumber")
         .get()
         .then((data) => {
             let patients = [];
             data.forEach((doc) => {
                 patients.push({
-                    firstName: doc.data().firstName,
-                    lastName: doc.data().lastName,
+                    id: doc.id,
+                    name: doc.data().name,
                     phoneNumber: doc.data().phoneNumber,
-                    qNumber: doc.data().qNumber
+                    qNumber: doc.data().qNumber,
+                    status: doc.data().status
                 })
             });
             return response.json(patients);
@@ -29,25 +30,29 @@ exports.getPatients = (request, response) => {
         });
 }
 
-exports.addToQueue = (request, response) => {
+exports.newPatient = async (request, response) => {
 
-    if (request.body.firstName.trim() === "" ||
-        request.body.lastName.trim() === "" ||
+    if (request.body.name.trim() === "" ||
         request.body.phoneNumber.trim() === "") {
         return response.status(400).json({ body: "Must not be empty! " });
     }
 
     const dateString = getDateString();
+    const dateRef = db.collection("root").doc(dateString);
+    const collRef = dateRef.collection("patients");
 
-    const dateRef = db.collection("root").doc(dateString).collection("patients");
+    const qDoc = await dateRef.get("patientsProcessed");
+    const qNumber = qDoc.data().patientsProcessed;
 
     const newUser = {
-        firstName: request.body.firstName,
-        lastName: request.body.lastName,
+        name: request.body.name,
         phoneNumber: request.body.phoneNumber,
+        qNumber: qNumber + 1,
+        status: "waiting",
+        checkInTime: FieldValue.serverTimestamp()
     };
 
-    dateRef
+    collRef
         .add(newUser)
         .then((doc) => {
             const responseUser = newUser;
@@ -55,9 +60,34 @@ exports.addToQueue = (request, response) => {
             return response.json(responseUser);
         })
         .catch((err) => {
-            response.status(500).json({ error: "Something went wrong!" });
             console.log(err);
+            return response.status(500).json({ error: "Something went wrong!" });
         });
+
+    return response.send(200, { message: 'Success!' });
+}
+
+exports.updatePatientStatus = (request, response) => {
+    console.log(request.body.id);
+    if (request.body.id === "" || request.body.status === "") {
+        return response.status(400).json({ body: "Must not be empty! " });
+    }
+
+    const dateString = getDateString();
+    db
+        .collection("root")
+        .doc(dateString)
+        .collection("patients").doc(request.body.id)
+        .update({
+            status: request.body.status
+        })
+        .catch((err) => {
+            console.log(err);
+            return response.status(500).json({ error: "Something went wrong!" });
+        });
+
+    return response.send(200, { message: 'Success!' });
+
 }
 
 exports.addTrigger = (change) => {
@@ -67,18 +97,13 @@ exports.addTrigger = (change) => {
 
     if (!change.before.exists) {
         // New document Created : add one to count
-        try {
-            docRef.update({ patientsProcessed: FieldValue.increment(1) });
-        } catch (error) {
-            docRef.set({ patientsProcessed: 1 });
-        }
+        docRef.update({ patientsProcessed: FieldValue.increment(1) });
 
     } else if (change.before.exists && change.after.exists) {
         // Updating existing document : Do nothing
 
     } else if (!change.after.exists) {
         // Deleting document : subtract one from count
-
         docRef.update({ patientsProcessed: FieldValue.increment(-1) });
 
     }

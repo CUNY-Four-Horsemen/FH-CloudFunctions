@@ -1,10 +1,18 @@
 const functions = require('firebase-functions');
-const app = require('express')();
+const express = require('express');
 
-const { getPatients, addToQueue, addTrigger } = require("./API/patients")
+const cors = require('cors');
+
+const app = express();
+
+// Automatically allow cross-origin requests
+app.use(cors({ origin: true }));
+
+const { getPatients, newPatient, updatePatientStatus, addTrigger } = require("./API/patients")
 
 app.get("/patients", getPatients);
-app.post("/addToQueue", addToQueue);
+app.post("/newPatient", newPatient);
+app.post("/updatePatientStatus", updatePatientStatus);
 
 exports.api = functions.https.onRequest(app);
 
